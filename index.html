@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>⚡ Algo Master Control</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-dark: #0b0f19;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --neon-blue: #00f2fe;
+            --neon-green: #10b981;
+            --neon-red: #ef4444;
+        }
+        body { 
+            background-color: var(--bg-dark); 
+            background-image: radial-gradient(circle at top right, rgba(0, 242, 254, 0.05), transparent 40%),
+                              radial-gradient(circle at bottom left, rgba(16, 185, 129, 0.05), transparent 40%);
+            color: #e2e8f0; 
+            font-family: 'Inter', sans-serif; 
+            padding-bottom: 50px;
+        }
+        .text-gradient {
+            background: linear-gradient(90deg, #8a2387, #e94057, #f27121);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 700;
+        }
+        .card-modern { 
+            background: var(--card-bg); 
+            backdrop-filter: blur(12px); 
+            border: 1px solid rgba(255, 255, 255, 0.08); 
+            border-radius: 16px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transition: transform 0.2s;
+        }
+        .card-modern:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.15); }
+        .form-control, .form-select { 
+            background-color: rgba(15, 23, 42, 0.8) !important; 
+            border: 1px solid rgba(255,255,255,0.1) !important; 
+            color: #fff !important; 
+            border-radius: 8px;
+        }
+        .form-control:focus, .form-select:focus { box-shadow: 0 0 0 2px rgba(0, 242, 254, 0.3); }
+        
+        /* ปุ่มเรืองแสง */
+        .btn-glow-success { background: var(--neon-green); color: #fff; border: none; box-shadow: 0 0 15px rgba(16, 185, 129, 0.4); border-radius: 10px; font-weight: 600;}
+        .btn-glow-success:hover { background: #059669; box-shadow: 0 0 20px rgba(16, 185, 129, 0.6); color: #fff;}
+        .btn-glow-danger { background: var(--neon-red); color: #fff; border: none; box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); border-radius: 10px; font-weight: 600;}
+        .btn-glow-danger:hover { background: #dc2626; box-shadow: 0 0 20px rgba(239, 68, 68, 0.6); color: #fff;}
+        .btn-glow-primary { background: linear-gradient(90deg, #3b82f6, #06b6d4); color: #fff; border: none; border-radius: 8px;}
+        .btn-glow-primary:hover { filter: brightness(1.2); color: #fff; }
+
+        /* Terminal สไตล์ Hacker */
+        .terminal-header { background: #1e293b; padding: 8px 15px; border-top-left-radius: 12px; border-top-right-radius: 12px; font-size: 0.85rem; color: #94a3b8; display: flex; align-items: center; }
+        .terminal-dots span { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+        .dot-red { background-color: #ff5f56; } .dot-yellow { background-color: #ffbd2e; } .dot-green { background-color: #27c93f; }
+        #terminal-box { 
+            background-color: #020617; color: #10b981; 
+            font-family: 'Courier New', Courier, monospace; 
+            font-size: 13px; height: 320px; overflow-y: auto; 
+            padding: 15px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.05);
+            border-top: none;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body>
+    <div id="login-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg-dark); z-index:9999; display:flex; justify-content:center; align-items:center;">
+        <div class="card-modern p-5 text-center shadow-lg" style="max-width:400px; width:90%;">
+            <h2 class="text-gradient mb-4"><i class="fa-solid fa-lock me-2"></i>Security Login</h2>
+            <p class="text-secondary small mb-4">เข้าสู่ระบบเพื่อควบคุมเซิร์ฟเวอร์เทรด</p>
+            
+            <input type="password" id="login-password" class="form-control form-control-lg bg-dark text-light border-secondary mb-3 text-center" placeholder="ป้อนรหัสผ่าน..." onkeypress="if(event.key === 'Enter') doLogin()">
+            
+            <button class="btn btn-glow-primary w-100 py-2 fs-5" onclick="doLogin()">
+                <i class="fa-solid fa-right-to-bracket me-2"></i>เข้าสู่ระบบ
+            </button>
+            <div id="login-error" class="text-danger mt-3 fw-bold" style="display:none;"><i class="fa-solid fa-triangle-exclamation me-1"></i> รหัสผ่านไม่ถูกต้อง!</div>
+        </div>
+    </div>
+    <div class="container pt-4">
+        <div class="card-modern p-3 mb-4 mt-2 d-flex justify-content-around align-items-center flex-wrap">
+            <div class="text-center px-4">
+                <span class="text-secondary small"><i class="fa-solid fa-wallet me-1"></i> Balance</span>
+                <h3 class="text-light mb-0" id="acc-balance">0.00</h3>
+            </div>
+            <div class="text-center px-4 border-start border-end border-secondary">
+                <span class="text-secondary small"><i class="fa-solid fa-chart-line me-1"></i> Equity</span>
+                <h3 class="text-info mb-0" id="acc-equity">0.00</h3>
+            </div>
+            <div class="text-center px-4">
+                <span class="text-secondary small"><i class="fa-solid fa-hand-holding-dollar me-1"></i> Total PnL</span>
+                <h3 class="mb-0" id="acc-profit">0.00</h3>
+            </div>
+        </div>
+        <!-- <div class="d-flex justify-content-between align-items-end mb-3 border-bottom border-secondary pb-2"> -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="text-gradient m-0"><i class="fa-solid fa-rocket me-2"></i>Algo Master Control</h2>
+            <div><span id="status-badge" class="badge bg-secondary fs-6 py-2 px-3 rounded-pill"><i class="fa-solid fa-spinner fa-spin me-2"></i>กำลังเชื่อมต่อ...</span></div>
+        </div>
+
+        
+        <div class="row mb-5">
+            <div class="col-lg-4 mb-4 mb-lg-0">
+                <div class="card-modern p-4 h-100 d-flex flex-column justify-content-between">
+                    <div>
+                        <h5 class="text-light mb-4"><i class="fa-solid fa-power-off me-2 text-info"></i>System Power</h5>
+                        <button id="toggle-btn" class="btn w-100 py-3 fs-5 btn-secondary rounded-4" onclick="toggleBot()">
+                            รอเชื่อมต่อเซิร์ฟเวอร์...
+                        </button>
+                    </div>
+                    
+                    <div class="mt-4 pt-4 border-top border-secondary">
+                        <h6 class="text-info mb-3"><i class="fa-solid fa-plus-circle me-2"></i>Auto-Calculate Pair</h6>
+                        <div class="input-group">
+                            <span class="input-group-text bg-dark border-secondary text-secondary"><i class="fa-solid fa-coins"></i></span>
+                            <input type="text" id="new-symbol" class="form-control" placeholder="เช่น XAUUSDm" onkeypress="if(event.key === 'Enter') addSymbol()">
+                            <button class="btn btn-glow-primary px-4" onclick="addSymbol()">Add</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-8">
+                <div class="card-modern h-100 shadow-lg" style="padding: 0; overflow: hidden;">
+                    <div class="terminal-header">
+                        <div class="terminal-dots me-3">
+                            <span class="dot-red"></span><span class="dot-yellow"></span><span class="dot-green"></span>
+                        </div>
+                        <i class="fa-solid fa-terminal me-2"></i> Server.py Live Console
+                    </div>
+                    <div id="terminal-box">รอเชื่อมต่อข้อมูลจาก Backend...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-end mb-3 border-bottom border-secondary pb-2">
+            <h4 class="text-light m-0"><i class="fa-solid fa-briefcase me-2 text-warning"></i>Portfolio Setup</h4>
+        </div>
+        
+        <div class="row" id="portfolio-grid">
+            </div>
+    </div>
+
+    <script>
+        const API_URL = "http://127.0.0.1:8000/api";
+        let availableStrategies = [];
+        let authToken = localStorage.getItem("bot_token"); // ดึงกุญแจจากความจำเครื่อง
+
+        // 🌟 ฟังก์ชันจัดการ Headers สำหรับแนบ Token ไปทุกคำสั่ง
+        function getHeaders() {
+            return {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${authToken}`
+            };
+        }
+
+        // 🌟 ฟังก์ชัน Login
+        async function doLogin() {
+            const pwd = document.getElementById("login-password").value;
+            try {
+                const res = await fetch(`${API_URL}/login`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ password: pwd })
+                });
+                if(res.ok) {
+                    const data = await res.json();
+                    authToken = data.token;
+                    localStorage.setItem("bot_token", authToken); // จำกุญแจไว้
+                    document.getElementById("login-error").style.display = "none";
+                    document.getElementById("login-overlay").style.display = "none";
+                    loadStatus();
+                } else {
+                    document.getElementById("login-error").style.display = "block";
+                }
+            } catch(e) { alert("ติดต่อเซิร์ฟเวอร์ไม่ได้ โปรดตรวจสอบว่ารัน server.py หรือยัง"); }
+        }
+
+        // 🌟 ตรวจสอบว่าโดนเตะออกไหม (Unauthorized 401)
+        function checkAuth(res) {
+            if(res.status === 401) {
+                localStorage.removeItem("bot_token");
+                document.getElementById("login-overlay").style.display = "flex";
+                document.getElementById("login-password").value = "";
+                return false;
+            }
+            return true;
+        }
+
+        async function loadStatus() {
+            if(!authToken) { document.getElementById("login-overlay").style.display = "flex"; return; }
+            
+            try {
+                const res = await fetch(`${API_URL}/status`, { headers: getHeaders() });
+                if(!checkAuth(res)) return; // ถ้าไม่มีสิทธิ์ ให้หยุดทำงานแล้วโชว์หน้า Login
+                
+                const data = await res.json();
+                document.getElementById("login-overlay").style.display = "none";
+                availableStrategies = data.strategies;
+                
+                let acc = data.account_info;
+                document.getElementById('acc-balance').innerText = `$${acc.balance.toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+                document.getElementById('acc-equity').innerText = `$${acc.equity.toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+                let pnlEl = document.getElementById('acc-profit');
+                pnlEl.innerText = `${acc.profit >= 0 ? '+' : ''}$${acc.profit.toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+                pnlEl.className = acc.profit >= 0 ? "text-success mb-0" : "text-danger mb-0";
+                
+                const badge = document.getElementById("status-badge");
+                const btn = document.getElementById("toggle-btn");
+                if(data.bot_running) {
+                    badge.className = "badge bg-success bg-opacity-25 text-success border border-success fs-6 py-2 px-3 rounded-pill"; 
+                    badge.innerHTML = "<i class='fa-solid fa-circle-check me-2'></i>ออนไลน์";
+                    btn.className = "btn btn-glow-danger w-100 py-3 fs-5"; 
+                    btn.innerHTML = "<i class='fa-solid fa-stop me-2'></i>หยุดการทำงานบอท";
+                } else {
+                    badge.className = "badge bg-danger bg-opacity-25 text-danger border border-danger fs-6 py-2 px-3 rounded-pill"; 
+                    badge.innerHTML = "<i class='fa-solid fa-power-off me-2'></i>ออฟไลน์";
+                    btn.className = "btn btn-glow-success w-100 py-3 fs-5"; 
+                    btn.innerHTML = "<i class='fa-solid fa-play me-2'></i>เริ่มทำงานบอท";
+                }
+
+                renderPortfolio(data.portfolio, data.market_status, data.positions_data);
+            } catch (e) {}
+        }
+
+        function renderPortfolio(portfolio, marketStatus, positionsData) {
+            const grid = document.getElementById("portfolio-grid");
+            grid.innerHTML = "";
+            for (const [symbol, setting] of Object.entries(portfolio)) {
+                let options = availableStrategies.map(s => `<option value="${s}" ${setting.strategy === s ? 'selected' : ''}>${s}</option>`).join('');
+                let m = marketStatus && marketStatus[symbol] ? marketStatus[symbol] : { price: '-', adx: '-', rsi: '-', signal: 'WAIT', strat: '-' };
+                let sigColor = "text-secondary";
+                if (m.signal === "BUY") sigColor = "text-success fw-bold";
+                if (m.signal === "SELL") sigColor = "text-danger fw-bold";
+                let adxColor = m.adx >= 25 ? "text-success fw-bold" : "text-secondary";
+
+                let pos = positionsData && positionsData[symbol] ? positionsData[symbol] : null;
+                let posHtml = "";
+                if (pos) {
+                    let pColor = pos.profit >= 0 ? "text-success" : "text-danger";
+                    posHtml = `
+                    <div class="mt-2 p-2 rounded shadow-sm d-flex justify-content-between align-items-center" style="background: rgba(0, 0, 0, 0.5); border: 1px dashed rgba(255,255,255,0.2);">
+                        <div>
+                            <span class="badge ${pos.type === 'BUY' ? 'bg-success' : 'bg-danger'} py-1 px-2 fs-6">${pos.type} ${pos.volume.toFixed(2)} Lot</span>
+                            <span class="fs-5 fw-bold ms-2 ${pColor}">${pos.profit >= 0 ? "+" : ""}$${pos.profit.toFixed(2)}</span>
+                        </div>
+                        <button class="btn btn-sm btn-danger px-3 fw-bold" onclick="closeOrder('${symbol}')"><i class="fa-solid fa-xmark"></i> ปิด</button>
+                    </div>`;
+                } else {
+                    posHtml = `<div class="mt-2 p-2 rounded text-center text-secondary small" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05);">ไม่มีออร์เดอร์เปิดอยู่</div>`;
+                }
+
+                grid.innerHTML += `
+                <div class="col-md-6 col-xl-4 mb-4">
+                    <div class="card-modern p-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h4 class="text-info fw-bold m-0">${symbol}</h4>
+                            <button class="btn btn-sm btn-outline-danger border-0" onclick="deleteSymbol('${symbol}')"><i class="fa-solid fa-trash-can fs-5"></i></button>
+                        </div>
+                        <div class="p-3 mb-2 rounded shadow-sm" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.05);">
+                            <div class="d-flex justify-content-between align-items-center mb-2 border-bottom border-secondary pb-1">
+                                <span class="small text-secondary">Price: <b class="text-light fs-6">${m.price}</b></span>
+                                <span class="badge bg-dark border border-secondary px-3 py-1 ${sigColor}">Signal: ${m.signal}</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center small mt-2">
+                                <span class="text-secondary">ADX: <b class="${adxColor}">${m.adx}</b></span>
+                                <span class="text-secondary">RSI: <b class="text-info">${m.rsi}</b></span>
+                                <span class="text-secondary">Active: <b class="text-warning">${m.strat === '-' ? setting.strategy : m.strat}</b></span>
+                            </div>
+                        </div>
+                        ${posHtml}
+                        <hr class="border-secondary mt-3 mb-3">
+                        <div class="mb-3">
+                            <label class="small text-secondary mb-1">Strategy Setup</label>
+                            <select id="strat-${symbol}" class="form-select form-select-sm">${options}</select>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-6"><label class="small text-secondary mb-1">Risk (%)</label><input type="number" step="0.1" id="risk-${symbol}" class="form-control form-control-sm text-center fw-bold text-warning" value="${setting.risk}"></div>
+                            <div class="col-6"><label class="small text-secondary mb-1">Trailing</label><input type="number" id="trail-${symbol}" class="form-control form-control-sm text-center" value="${setting.trailing}"></div>
+                            <div class="col-6"><label class="small text-secondary mb-1 text-success">Take Profit</label><input type="number" id="tp-${symbol}" class="form-control form-control-sm text-center text-success" value="${setting.tp}"></div>
+                            <div class="col-6"><label class="small text-secondary mb-1 text-danger">Stop Loss</label><input type="number" id="sl-${symbol}" class="form-control form-control-sm text-center text-danger" value="${setting.sl}"></div>
+                        </div>
+                        <button class="btn btn-glow-primary w-100 py-2 mt-2" onclick="updateSymbol('${symbol}')"><i class="fa-solid fa-floppy-disk me-2"></i>บันทึกการตั้งค่า</button>
+                    </div>
+                </div>`;
+            }
+        }
+
+        async function toggleBot() { await fetch(`${API_URL}/toggle`, { method: "POST", headers: getHeaders() }); loadStatus(); }
+        
+        async function addSymbol() {
+            const symbol = document.getElementById("new-symbol").value;
+            if(!symbol) return;
+            const res = await fetch(`${API_URL}/portfolio`, { method: "POST", headers: getHeaders(), body: JSON.stringify({ symbol }) });
+            if(res.ok) { document.getElementById("new-symbol").value = ""; loadStatus(); }
+            else { alert("เพิ่มไม่สำเร็จ"); }
+        }
+
+        async function updateSymbol(symbol) {
+            const payload = {
+                strategy: document.getElementById(`strat-${symbol}`).value, risk: parseFloat(document.getElementById(`risk-${symbol}`).value),
+                tp: parseInt(document.getElementById(`tp-${symbol}`).value), sl: parseInt(document.getElementById(`sl-${symbol}`).value),
+                trailing: parseInt(document.getElementById(`trail-${symbol}`).value)
+            };
+            await fetch(`${API_URL}/portfolio/${symbol}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify(payload) });
+        }
+
+        async function deleteSymbol(symbol) {
+            if(confirm(`ยืนยันการลบคู่เงิน ${symbol}?`)) { await fetch(`${API_URL}/portfolio/${symbol}`, { method: "DELETE", headers: getHeaders() }); loadStatus(); }
+        }
+
+        async function closeOrder(symbol) {
+            if(confirm(`⚠️ ยืนยันการ "ปิดออร์เดอร์" คู่เงิน ${symbol} ทันที?`)) {
+                const res = await fetch(`${API_URL}/close/${symbol}`, { method: "POST", headers: getHeaders() });
+                const data = await res.json();
+                if(data.status === "success") { alert(`✅ ปิดออร์เดอร์ ${symbol} เรียบร้อยแล้ว!`); loadStatus(); }
+                else alert(`❌ ${data.message}`);
+            }
+        }
+
+        async function fetchLogs() {
+            if(!authToken) return;
+            try {
+                const res = await fetch(`${API_URL}/logs`, { headers: getHeaders() });
+                if(!checkAuth(res)) return;
+                const data = await res.json();
+                const terminal = document.getElementById("terminal-box");
+                const isScrolled = terminal.scrollHeight - terminal.clientHeight <= terminal.scrollTop + 10;
+                terminal.innerHTML = data.logs.join('<br>');
+                if(isScrolled) terminal.scrollTop = terminal.scrollHeight;
+            } catch(e) {}
+        }
+
+        // เริ่มโหลดสถานะทันทีที่เปิดเว็บ
+        loadStatus();
+        setInterval(fetchLogs, 1500);
+        setInterval(loadStatus, 5000);
+    </script>
+</body>
+</html>

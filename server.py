@@ -63,12 +63,15 @@ def get_portfolio():
 
 def auto_calculate_settings(symbol):
     if not mt5.initialize(): return None
+    
+    # 🌟 [เพิ่มโค้ดบรรทัดนี้] สั่งให้ MT5 ดึงคู่เงินนี้มาแสดงในหน้าต่าง Market Watch อัตโนมัติ
+    mt5.symbol_select(symbol, True) 
+    
     sym_info = mt5.symbol_info(symbol)
     if sym_info is None: return None
     spread = sym_info.spread if sym_info.spread > 0 else 200
     sl_calculated = max(int(spread * 5), 100)
     return {"risk": 1.0, "tp": int(sl_calculated * 2), "sl": sl_calculated, "trailing": int(sl_calculated * 0.5), "strategy": "AUTO_DETECT"}
-
 # ==========================================
 # 🧠 3. สมองของบอท (Trading Logic & Strategies)
 # ==========================================
@@ -331,17 +334,32 @@ def toggle_bot():
 
 @app.post("/api/portfolio", dependencies=[Depends(verify_token)])
 def add_symbol(data: AddSymbol):
-    symbol = data.symbol.strip().upper()
-    settings = auto_calculate_settings(symbol)
-    if settings is None: raise HTTPException(status_code=400, detail="ไม่พบคู่เงินนี้ใน MT5")
+    # 🌟 1. เอา .upper() ออก เพื่อให้ตัว m เล็ก ไม่ถูกแปลงเป็น M ใหญ่
+    symbol = data.symbol.strip() 
     
+    # 🌟 2. ลองให้บอทคำนวณค่าอัตโนมัติก่อน
+    settings = auto_calculate_settings(symbol)
+    
+    # 🌟 3. ถ้าระบบของ MT5 งอแงหาไม่เจอ ให้เรา "บังคับแอด (Manual)" เข้าไปเลยด้วยค่า Default ของสายซิ่ง
+    if settings is None: 
+        add_log(f"⚠️ บังคับเพิ่มคู่เงิน {symbol} (โหมด Manual)")
+        settings = {
+            "risk": 1.0, 
+            "tp": 2000,     # ค่า Default TP สำหรับคริปโต
+            "sl": 3000,     # ค่า Default SL สำหรับคริปโต
+            "trailing": 500, # ค่า Default Trailing
+            "strategy": "Scalping_Fast"
+        }
+    
+    # บันทึกลงฐานข้อมูล
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("INSERT OR REPLACE INTO portfolio VALUES (?, ?, ?, ?, ?, ?)",
               (symbol, settings["risk"], settings["tp"], settings["sl"], settings["trailing"], settings["strategy"]))
     conn.commit()
     conn.close()
-    add_log(f"➕ เพิ่มคู่เงิน {symbol} สำเร็จ!")
+    
+    add_log(f"➕ เพิ่มคู่เงิน {symbol} ลงระบบสำเร็จ!")
     return {"status": "success"}
 
 @app.put("/api/portfolio/{symbol}", dependencies=[Depends(verify_token)])

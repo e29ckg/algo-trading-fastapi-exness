@@ -136,6 +136,21 @@ def get_signal(symbol, timeframe, strategy):
             if not pd.isna(last.get('STOCHk_14_3_3')) and not pd.isna(last.get('RSI_14')):
                 if last['RSI_14'] < 30 and prev['STOCHk_14_3_3'] <= prev['STOCHd_14_3_3'] and last['STOCHk_14_3_3'] > last['STOCHd_14_3_3'] and last['STOCHk_14_3_3'] < 20: signal = "BUY"
                 elif last['RSI_14'] > 70 and prev['STOCHk_14_3_3'] >= prev['STOCHd_14_3_3'] and last['STOCHk_14_3_3'] < last['STOCHd_14_3_3'] and last['STOCHk_14_3_3'] > 80: signal = "SELL"
+        
+        elif actual_strat == "Scalping_Fast":
+            # ⚡ กลยุทธ์เข้าไวออกไว: ใช้เส้น EMA 5 ตัด EMA 13 (ไวมาก) + RSI คอนเฟิร์มทิศทาง
+            df.ta.ema(length=5, append=True)
+            df.ta.ema(length=13, append=True)
+            df.ta.rsi(length=14, append=True)
+            
+            if not pd.isna(last.get('EMA_13')) and not pd.isna(last.get('RSI_14')):
+                # ถ้าเส้น 5 ตัด 13 ขึ้น + RSI เกิน 50 (มีแรงซื้อ) -> กด BUY
+                if prev['EMA_5'] <= prev['EMA_13'] and last['EMA_5'] > last['EMA_13'] and last['RSI_14'] > 50: 
+                    signal = "BUY"
+                # ถ้าเส้น 5 ตัด 13 ลง + RSI ต่ำกว่า 50 (มีแรงขาย) -> กด SELL
+                elif prev['EMA_5'] >= prev['EMA_13'] and last['EMA_5'] < last['EMA_13'] and last['RSI_14'] < 50: 
+                    signal = "SELL"   
+
     except Exception: pass
     
     # 🌟 [เพิ่มใหม่] เก็บค่าลง Global Variable เพื่อให้ API ดึงไปโชว์
@@ -180,11 +195,13 @@ def bot_loop():
                             add_log(f"🛡️ {symbol}: ขยับ SL ป้องกันกำไรไม้ SELL ไปที่ {new_sl:.5f}")
                 
                 # แม้จะมีออร์เดอร์อยู่ ก็เรียก get_signal เพื่อให้หน้าเว็บดึงค่าอัปเดตไปโชว์ได้
-                get_signal(symbol, mt5.TIMEFRAME_M15, settings["strategy"]) 
+                # get_signal(symbol, mt5.TIMEFRAME_M15, settings["strategy"]) 
+                get_signal(symbol, mt5.TIMEFRAME_M5, settings["strategy"])
                 continue 
             
             # --- 2. สแกนหาสัญญาณเข้าเทรด ---
-            signal = get_signal(symbol, mt5.TIMEFRAME_M15, settings["strategy"])
+            # signal = get_signal(symbol, mt5.TIMEFRAME_M15, settings["strategy"])
+            signal = get_signal(symbol, mt5.TIMEFRAME_M5, settings["strategy"])
             if signal in ["BUY", "SELL"]:
                 lot = calculate_lot(symbol, settings["sl"], settings["risk"])
                 tick = mt5.symbol_info_tick(symbol)
@@ -290,7 +307,7 @@ def get_status():
     return {
         "bot_running": bot_running, 
         "portfolio": get_portfolio(), 
-        "strategies": ["AUTO_DETECT", "Trend_ADX_EMA", "Bollinger_Bands", "MACD_EMA200", "Donchian_Breakout", "Stoch_RSI"],
+        "strategies": ["AUTO_DETECT", "Scalping_Fast", "Trend_ADX_EMA", "Bollinger_Bands", "MACD_EMA200", "Donchian_Breakout", "Stoch_RSI"],
         "market_status": market_status,
         "account_info": account_data,
         "positions_data": positions_data

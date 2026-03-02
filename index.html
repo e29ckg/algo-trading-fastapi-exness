@@ -152,11 +152,11 @@
     </div>
 
     <script>
-        const API_URL = "http://127.0.0.1:8000/api";
+        // 🌟 แก้ 127.0.0.1 ทิ้ง ให้เหลือแค่ /api
+        const API_URL = "/api"; 
         let availableStrategies = [];
-        let authToken = localStorage.getItem("bot_token"); // ดึงกุญแจจากความจำเครื่อง
+        let authToken = localStorage.getItem("bot_token"); 
 
-        // 🌟 ฟังก์ชันจัดการ Headers สำหรับแนบ Token ไปทุกคำสั่ง
         function getHeaders() {
             return {
                 "Content-Type": "application/json",
@@ -164,7 +164,6 @@
             };
         }
 
-        // 🌟 ฟังก์ชัน Login
         async function doLogin() {
             const pwd = document.getElementById("login-password").value;
             try {
@@ -175,7 +174,7 @@
                 if(res.ok) {
                     const data = await res.json();
                     authToken = data.token;
-                    localStorage.setItem("bot_token", authToken); // จำกุญแจไว้
+                    localStorage.setItem("bot_token", authToken); 
                     document.getElementById("login-error").style.display = "none";
                     document.getElementById("login-overlay").style.display = "none";
                     loadStatus();
@@ -185,7 +184,6 @@
             } catch(e) { alert("ติดต่อเซิร์ฟเวอร์ไม่ได้ โปรดตรวจสอบว่ารัน server.py หรือยัง"); }
         }
 
-        // 🌟 ตรวจสอบว่าโดนเตะออกไหม (Unauthorized 401)
         function checkAuth(res) {
             if(res.status === 401) {
                 localStorage.removeItem("bot_token");
@@ -201,7 +199,7 @@
             
             try {
                 const res = await fetch(`${API_URL}/status`, { headers: getHeaders() });
-                if(!checkAuth(res)) return; // ถ้าไม่มีสิทธิ์ ให้หยุดทำงานแล้วโชว์หน้า Login
+                if(!checkAuth(res)) return; 
                 
                 const data = await res.json();
                 document.getElementById("login-overlay").style.display = "none";
@@ -228,7 +226,15 @@
                     btn.innerHTML = "<i class='fa-solid fa-play me-2'></i>เริ่มทำงานบอท";
                 }
 
-                renderPortfolio(data.portfolio, data.market_status, data.positions_data);
+                // 🌟 [เพิ่มระบบใหม่] เช็คว่ายูสเซอร์กำลังจิ้มช่องพิมพ์ หรือเลือก Dropdown อยู่หรือไม่
+                const activeTag = document.activeElement ? document.activeElement.tagName : "";
+                const isTyping = (activeTag === "INPUT" || activeTag === "SELECT");
+
+                // 🌟 ถ้าไม่ได้กำลังพิมพ์อยู่ ค่อยวาดการ์ดใหม่ (หน้าจอจะได้ไม่กระตุกตอนเราตั้งค่า)
+                if (!isTyping) {
+                    renderPortfolio(data.portfolio, data.market_status, data.positions_data);
+                }
+
             } catch (e) {}
         }
 
@@ -297,21 +303,39 @@
 
         async function toggleBot() { await fetch(`${API_URL}/toggle`, { method: "POST", headers: getHeaders() }); loadStatus(); }
         
+        // 🌟 อัปเกรดฟังก์ชันเพิ่มคู่เงินให้มีการแจ้งเตือน
         async function addSymbol() {
             const symbol = document.getElementById("new-symbol").value;
             if(!symbol) return;
-            const res = await fetch(`${API_URL}/portfolio`, { method: "POST", headers: getHeaders(), body: JSON.stringify({ symbol }) });
-            if(res.ok) { document.getElementById("new-symbol").value = ""; loadStatus(); }
-            else { alert("เพิ่มไม่สำเร็จ"); }
+            try {
+                const res = await fetch(`${API_URL}/portfolio`, { method: "POST", headers: getHeaders(), body: JSON.stringify({ symbol }) });
+                if(res.ok) { 
+                    document.getElementById("new-symbol").value = ""; 
+                    loadStatus(); 
+                    alert(`➕ เพิ่มคู่เงิน ${symbol} ลงในพอร์ตสำเร็จ!`);
+                } else { 
+                    alert(`❌ เพิ่มคู่เงินไม่สำเร็จ! โปรดตรวจสอบว่าพิมพ์ชื่อคู่เงินถูกต้องตาม MT5 หรือไม่ (เช่น BTCUSD หรือ XAUUSDm)`); 
+                }
+            } catch(e) { alert("❌ ติดต่อเซิร์ฟเวอร์ไม่ได้"); }
         }
 
+        // 🌟 อัปเกรดฟังก์ชันบันทึกการตั้งค่าให้มีการแจ้งเตือน
         async function updateSymbol(symbol) {
             const payload = {
-                strategy: document.getElementById(`strat-${symbol}`).value, risk: parseFloat(document.getElementById(`risk-${symbol}`).value),
-                tp: parseInt(document.getElementById(`tp-${symbol}`).value), sl: parseInt(document.getElementById(`sl-${symbol}`).value),
+                strategy: document.getElementById(`strat-${symbol}`).value, 
+                risk: parseFloat(document.getElementById(`risk-${symbol}`).value),
+                tp: parseInt(document.getElementById(`tp-${symbol}`).value), 
+                sl: parseInt(document.getElementById(`sl-${symbol}`).value),
                 trailing: parseInt(document.getElementById(`trail-${symbol}`).value)
             };
-            await fetch(`${API_URL}/portfolio/${symbol}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify(payload) });
+            try {
+                const res = await fetch(`${API_URL}/portfolio/${symbol}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify(payload) });
+                if(res.ok) {
+                    alert(`💾 บันทึกการตั้งค่า ${symbol} สำเร็จ!`);
+                } else {
+                    alert(`❌ บันทึกการตั้งค่าล้มเหลว`);
+                }
+            } catch(e) { alert("❌ ติดต่อเซิร์ฟเวอร์ไม่ได้"); }
         }
 
         async function deleteSymbol(symbol) {
@@ -345,5 +369,6 @@
         setInterval(fetchLogs, 1500);
         setInterval(loadStatus, 5000);
     </script>
+    
 </body>
 </html>

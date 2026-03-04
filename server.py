@@ -15,29 +15,22 @@ import uvicorn
 from collections import deque
 from dotenv import load_dotenv
 
-# 🌟 แผนผังแปลภาษา Timeframe ให้บอทเข้าใจ
 TF_MAP = {
     "M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15,
     "M30": mt5.TIMEFRAME_M30, "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4,
     "D1": mt5.TIMEFRAME_D1
 }
 
-# ==========================================
-# 🔐 1. โหลดการตั้งค่าลับจากไฟล์ .env
-# ==========================================
 load_dotenv()
-
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 DB_NAME = "bot_settings.db"
 
-# ==========================================
-# ⚙️ 2. ระบบพื้นฐาน (Logs & Database)
-# ==========================================
 bot_logs = deque(maxlen=100)
 bot_thread = None
 bot_running = False
 market_status = {}
+active_tickets = {} 
 
 def add_log(message):
     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -54,16 +47,17 @@ def send_telegram(message):
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    # 🌟 สร้างฐานข้อมูลพร้อมคอลัมน์ timeframe
     c.execute('''CREATE TABLE IF NOT EXISTS portfolio
-                 (symbol TEXT PRIMARY KEY, risk REAL, tp INTEGER, sl INTEGER, trailing INTEGER, strategy TEXT, timeframe TEXT DEFAULT 'M5')''')
-    
-    # 🌟 อัปเกรดฐานข้อมูลเก่าให้รองรับ timeframe (ถ้าเคยมีไฟล์ .db เก่าอยู่แล้ว)
-    try:
-        c.execute("ALTER TABLE portfolio ADD COLUMN timeframe TEXT DEFAULT 'M5'")
-    except:
-        pass
-        
+                 (symbol TEXT PRIMARY KEY, risk REAL, tp INTEGER, sl INTEGER, trailing INTEGER, strategy TEXT, timeframe TEXT DEFAULT 'M5', start_time TEXT DEFAULT '00:00', end_time TEXT DEFAULT '23:59', max_loss REAL DEFAULT 5.0)''')
+    # 🌟 อัปเกรดฐานข้อมูล เพิ่มคอลัมน์ใหม่
+    try: c.execute("ALTER TABLE portfolio ADD COLUMN timeframe TEXT DEFAULT 'M5'")
+    except: pass
+    try: c.execute("ALTER TABLE portfolio ADD COLUMN start_time TEXT DEFAULT '00:00'")
+    except: pass
+    try: c.execute("ALTER TABLE portfolio ADD COLUMN end_time TEXT DEFAULT '23:59'")
+    except: pass
+    try: c.execute("ALTER TABLE portfolio ADD COLUMN max_loss REAL DEFAULT 5.0")
+    except: pass
     conn.commit()
     conn.close()
 
@@ -78,9 +72,10 @@ def get_portfolio():
     portfolio = {}
     for row in rows:
         data = dict(row)
-        # ป้องกัน error กรณีดึงข้อมูลเก่าที่ยังไม่มี Timeframe
-        if 'timeframe' not in data or not data['timeframe']:
-            data['timeframe'] = 'M5'
+        if 'timeframe' not in data or not data['timeframe']: data['timeframe'] = 'M5'
+        if 'start_time' not in data or not data['start_time']: data['start_time'] = '00:00'
+        if 'end_time' not in data or not data['end_time']: data['end_time'] = '23:59'
+        if 'max_loss' not in data or data['max_loss'] is None: data['max_loss'] = 5.0
         portfolio[row['symbol']] = data
     return portfolio
 
@@ -93,9 +88,6 @@ def auto_calculate_settings(symbol):
     sl_calculated = max(int(spread * 5), 100)
     return {"risk": 1.0, "tp": int(sl_calculated * 2), "sl": sl_calculated, "trailing": int(sl_calculated * 0.5), "strategy": "AUTO_DETECT"}
 
-# ==========================================
-# 🧠 3. สมองของบอท (Trading Logic & Strategies)
-# ==========================================
 def calculate_lot(symbol, sl_points, risk_percent):
     account = mt5.account_info()
     sym_info = mt5.symbol_info(symbol)
@@ -104,6 +96,30 @@ def calculate_lot(symbol, sl_points, risk_percent):
     if loss_value == 0: return sym_info.volume_min
     lot = round((account.balance * (risk_percent / 100)) / loss_value / sym_info.volume_step) * sym_info.volume_step
     return round(max(sym_info.volume_min, min(lot, sym_info.volume_max)), 2)
+
+# 🌟 ฟังก์ชันตรวจสอบเวลาเทรด
+def is_trading_time(start_str, end_str):
+    if start_str == end_str: return True
+    now_str = datetime.now().strftime("%H:%M")
+    if start_str < end_str: return start_str <= now_str <= end_str
+    else: return now_str >= start_str or now_str <= end_str # กรณีข้ามคืน เช่น 22:00 - 02:00
+
+# 🌟 ฟังก์ชันตรวจสอบว่าวันนี้ขาดทุนทะลุเป้าหรือยัง
+def check_daily_max_loss(symbol, max_loss_pct):
+    account = mt5.account_info()
+    if not account: return False
+    now = datetime.now()
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    deals = mt5.history_deals_get(midnight, now)
+    
+    daily_pnl = 0.0
+    if deals:
+        for d in deals:
+            if d.symbol == symbol:
+                daily_pnl += d.profit + d.commission + d.swap
+                
+    max_loss_amount = account.balance * (max_loss_pct / 100)
+    return daily_pnl <= -max_loss_amount
 
 def get_signal(symbol, timeframe, strategy):
     global market_status
@@ -122,14 +138,12 @@ def get_signal(symbol, timeframe, strategy):
     df.ta.stoch(append=True)
     
     last, prev = df.iloc[-2], df.iloc[-3]
-    
     adx_val = round(last.get('ADX_14', 0), 2) if not pd.isna(last.get('ADX_14')) else 0
     rsi_val = round(last.get('RSI_14', 0), 2) if not pd.isna(last.get('RSI_14')) else 0
     price_val = round(last['close'], 5)
 
     actual_strat = strategy
-    if strategy == "AUTO_DETECT":
-        actual_strat = "Trend_ADX_EMA" if adx_val >= 25 else "Bollinger_Bands"
+    if strategy == "AUTO_DETECT": actual_strat = "Trend_ADX_EMA" if adx_val >= 25 else "Bollinger_Bands"
             
     signal = "WAIT"
     try:
@@ -137,60 +151,61 @@ def get_signal(symbol, timeframe, strategy):
             if adx_val >= 25:
                 if prev['EMA_10'] <= prev['EMA_50'] and last['EMA_10'] > last['EMA_50']: signal = "BUY"
                 elif prev['EMA_10'] >= prev['EMA_50'] and last['EMA_10'] < last['EMA_50']: signal = "SELL"
-                
         elif actual_strat == "Bollinger_Bands":
             if not pd.isna(last.get('BBL_20_2.0')):
                 if last['close'] < last['BBL_20_2.0']: signal = "BUY"
                 elif last['close'] > last['BBU_20_2.0']: signal = "SELL"
-                
         elif actual_strat == "MACD_EMA200":
             if not pd.isna(last.get('EMA_200')) and not pd.isna(last.get('MACD_12_26_9')):
                 if last['close'] > last['EMA_200'] and prev['MACD_12_26_9'] <= prev['MACDs_12_26_9'] and last['MACD_12_26_9'] > last['MACDs_12_26_9']: signal = "BUY"
                 elif last['close'] < last['EMA_200'] and prev['MACD_12_26_9'] >= prev['MACDs_12_26_9'] and last['MACD_12_26_9'] < last['MACDs_12_26_9']: signal = "SELL"
-                
         elif actual_strat == "Donchian_Breakout":
             if not pd.isna(last.get('DCU_20_20')):
                 if last['close'] > prev['DCU_20_20']: signal = "BUY"
                 elif last['close'] < prev['DCL_20_20']: signal = "SELL"
-                
         elif actual_strat == "Stoch_RSI":
             if not pd.isna(last.get('STOCHk_14_3_3')) and not pd.isna(last.get('RSI_14')):
                 if last['RSI_14'] < 30 and prev['STOCHk_14_3_3'] <= prev['STOCHd_14_3_3'] and last['STOCHk_14_3_3'] > last['STOCHd_14_3_3'] and last['STOCHk_14_3_3'] < 20: signal = "BUY"
                 elif last['RSI_14'] > 70 and prev['STOCHk_14_3_3'] >= prev['STOCHd_14_3_3'] and last['STOCHk_14_3_3'] < last['STOCHd_14_3_3'] and last['STOCHk_14_3_3'] > 80: signal = "SELL"
-        
         elif actual_strat == "Scalping_Fast":
-            df.ta.ema(length=5, append=True)
-            df.ta.ema(length=13, append=True)
-            df.ta.rsi(length=14, append=True)
-            
+            df.ta.ema(length=5, append=True); df.ta.ema(length=13, append=True); df.ta.rsi(length=14, append=True)
             if not pd.isna(last.get('EMA_13')) and not pd.isna(last.get('RSI_14')):
-                if prev['EMA_5'] <= prev['EMA_13'] and last['EMA_5'] > last['EMA_13'] and last['RSI_14'] > 50: 
-                    signal = "BUY"
-                elif prev['EMA_5'] >= prev['EMA_13'] and last['EMA_5'] < last['EMA_13'] and last['RSI_14'] < 50: 
-                    signal = "SELL"   
-
+                if prev['EMA_5'] <= prev['EMA_13'] and last['EMA_5'] > last['EMA_13'] and last['RSI_14'] > 50: signal = "BUY"
+                elif prev['EMA_5'] >= prev['EMA_13'] and last['EMA_5'] < last['EMA_13'] and last['RSI_14'] < 50: signal = "SELL"   
     except Exception: pass
     
-    market_status[symbol] = {
-        "price": price_val, "adx": adx_val, "rsi": rsi_val, "signal": signal, "strat": actual_strat
-    }
-    
+    market_status[symbol] = { "price": price_val, "adx": adx_val, "rsi": rsi_val, "signal": signal, "strat": actual_strat }
     return signal
 
 def bot_loop():
-    global bot_running
+    global bot_running, active_tickets
     mt5.initialize()
     add_log("🟢 [Backend] บอทเริ่มทำงานแล้ว! ระบบพร้อมลุยตลาด")
     
     while bot_running:
-        # add_log("-" * 40)
-        # add_log("🤖 [เริ่มรอบสแกนตลาดใหม่]")
         portfolio = get_portfolio()
         
+        # เช็คไม้ที่เพิ่งปิด (Auto-Close Alert)
+        current_positions = mt5.positions_get()
+        current_tickets = [pos.ticket for pos in current_positions] if current_positions else []
+        closed_tickets = [t for t in active_tickets.keys() if t not in current_tickets]
+        for t in closed_tickets:
+            sym = active_tickets[t]
+            deals = mt5.history_deals_get(position=t)
+            if deals:
+                close_deal = deals[-1]
+                net_profit = close_deal.profit + close_deal.commission + close_deal.swap
+                status_icon = "🟢 ปิดกำไร (Win)" if net_profit >= 0 else "🔴 ตัดขาดทุน (Loss)"
+                add_log(f"🔔 {sym}: ออร์เดอร์ถูกปิดแล้ว! PnL = ${net_profit:.2f}")
+                send_telegram(f"🔔 [Auto-Close]\nคู่เงิน: {sym}\nสถานะ: {status_icon}\n💰 ยอดเงิน: ${net_profit:.2f}")
+            del active_tickets[t]
+
+        if current_positions:
+            for pos in current_positions:
+                if pos.ticket not in active_tickets: active_tickets[pos.ticket] = pos.symbol
+
         for symbol, settings in portfolio.items():
             if not bot_running: break
-            
-            # 🌟 แปลงชื่อ Timeframe ที่ตั้งไว้ เป็นรหัสให้ MT5
             tf_str = settings.get("timeframe", "M5")
             tf_mt5 = TF_MAP.get(tf_str, mt5.TIMEFRAME_M5)
             
@@ -211,25 +226,36 @@ def bot_loop():
                             mt5.order_send({"action": mt5.TRADE_ACTION_SLTP, "position": pos.ticket, "sl": new_sl, "tp": pos.tp})
                             add_log(f"🛡️ {symbol}: ขยับ SL ป้องกันกำไรไม้ SELL ไปที่ {new_sl:.5f}")
                 
-                # 🌟 ส่ง Timeframe ที่ตั้งค่าไว้เข้าไปเช็ค
-                get_signal(symbol, tf_mt5, settings["strategy"])
-                continue 
+            # ดึงสัญญาณเพื่อส่งไปโชว์หน้าเว็บ (ไม่ว่าเวลาไหนก็ต้องดึงค่าไว้โชว์)
+            signal = get_signal(symbol, tf_mt5, settings["strategy"])
+            
+            # 🌟 [เช็คฟีเจอร์ใหม่ 1] ขาดทุนรายวันทะลุเป้าไหม?
+            if check_daily_max_loss(symbol, settings.get("max_loss", 5.0)):
+                market_status[symbol]["signal"] = "MAX LOSS"
+                continue # ห้ามเปิดไม้ใหม่เด็ดขาด!
+
+            # 🌟 [เช็คฟีเจอร์ใหม่ 2] อยู่ในเวลาเทรดหรือเปล่า?
+            if not is_trading_time(settings.get("start_time", "00:00"), settings.get("end_time", "23:59")):
+                market_status[symbol]["signal"] = "SLEEP"
+                continue # นอกเวลาทำการ ห้ามยิงออร์เดอร์!
             
             # --- 2. สแกนหาสัญญาณเข้าเทรด ---
-            # 🌟 ส่ง Timeframe ที่ตั้งค่าไว้เข้าไปเช็ค
-            signal = get_signal(symbol, tf_mt5, settings["strategy"])
             if signal in ["BUY", "SELL"]:
-                lot = calculate_lot(symbol, settings["sl"], settings["risk"])
                 tick = mt5.symbol_info_tick(symbol)
                 point = mt5.symbol_info(symbol).point
                 
+                spread_points = (tick.ask - tick.bid) / point
+                max_allowed_spread = settings["sl"] * 0.30 
+                if spread_points > max_allowed_spread:
+                    add_log(f"⚠️ {symbol}: ตลาดผันผวนรุนแรง! Spread ถ่าง {spread_points:.0f} จุด -> ข้ามการเทรดนี้")
+                    continue
+                
+                lot = calculate_lot(symbol, settings["sl"], settings["risk"])
                 if signal == "BUY":
-                    price = tick.ask
-                    sl, tp = price - (settings["sl"] * point), price + (settings["tp"] * point)
+                    price, sl, tp = tick.ask, tick.ask - (settings["sl"] * point), tick.ask + (settings["tp"] * point)
                     type_order = mt5.ORDER_TYPE_BUY
                 else:
-                    price = tick.bid
-                    sl, tp = price + (settings["sl"] * point), price - (settings["tp"] * point)
+                    price, sl, tp = tick.bid, tick.bid + (settings["sl"] * point), tick.bid - (settings["tp"] * point)
                     type_order = mt5.ORDER_TYPE_SELL
                 
                 req = {
@@ -247,11 +273,9 @@ def bot_loop():
                 else:
                     add_log(f"   ❌ ล้มเหลว! Error Code: {res.retcode if res else 'Unknown'}")
                 
-        # add_log("⏳ รอ 60 วินาที เพื่อตรวจสอบรอบถัดไป...")
-        # 🌟 ปรับให้บอทพักหายใจแค่ 5 วินาที (ลูป 5 รอบ รอบละ 1 วินาที)
         for _ in range(5):
             if not bot_running: break
-            time.sleep(2)
+            time.sleep(1)
             
     add_log("🛑 [Backend] บอทหยุดทำงานอย่างปลอดภัยแล้ว!")
 
@@ -260,45 +284,25 @@ def bot_loop():
 # ==========================================
 app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 BOT_PASSWORD = os.getenv("BOT_PASSWORD", "admin1234")
 API_TOKEN = f"secret_token_{BOT_PASSWORD}" 
 
 def verify_token(authorization: str = Header(None)):
-    if authorization != f"Bearer {API_TOKEN}":
-        raise HTTPException(status_code=401, detail="Unauthorized - กรุณาเข้าสู่ระบบ")
+    if authorization != f"Bearer {API_TOKEN}": raise HTTPException(status_code=401, detail="Unauthorized - กรุณาเข้าสู่ระบบ")
 
-class LoginData(BaseModel):
-    password: str
-
-# 🌟 เพิ่ม timeframe ลงใน Model ส่งข้อมูล
-class UpdateSetting(BaseModel):
-    strategy: str
-    risk: float
-    tp: int
-    sl: int
-    trailing: int
-    timeframe: str 
-
-class AddSymbol(BaseModel):
-    symbol: str
+class LoginData(BaseModel): password: str
+# 🌟 เพิ่มข้อมูล 3 ตัวรับจากหน้าเว็บ
+class UpdateSetting(BaseModel): strategy: str; risk: float; tp: int; sl: int; trailing: int; timeframe: str; start_time: str; end_time: str; max_loss: float
+class AddSymbol(BaseModel): symbol: str
 
 @app.get("/")
-def serve_frontend():
-    if os.path.exists("index.html"): return FileResponse("index.html")
-    else: return {"error": "ไม่พบไฟล์ index.html ในโฟลเดอร์เดียวกัน"}
+def serve_frontend(): return FileResponse("index.html") if os.path.exists("index.html") else {"error": "ไม่พบไฟล์ index.html"}
 
 @app.post("/api/login")
 def login(data: LoginData):
-    if data.password == BOT_PASSWORD:
-        return {"status": "success", "token": API_TOKEN}
+    if data.password == BOT_PASSWORD: return {"status": "success", "token": API_TOKEN}
     raise HTTPException(status_code=401, detail="รหัสผ่านไม่ถูกต้อง")
 
 @app.get("/api/status", dependencies=[Depends(verify_token)])
@@ -308,85 +312,59 @@ def get_status():
     
     if mt5.initialize():
         acc = mt5.account_info()
-        if acc:
-            account_data = {"balance": round(acc.balance, 2), "equity": round(acc.equity, 2), "profit": round(acc.profit, 2)}
+        if acc: account_data = {"balance": round(acc.balance, 2), "equity": round(acc.equity, 2), "profit": round(acc.profit, 2)}
         
         positions = mt5.positions_get()
         if positions:
             for pos in positions:
-                if pos.symbol not in positions_data:
-                    positions_data[pos.symbol] = {"profit": 0.0, "volume": 0.0, "type": "BUY" if pos.type == mt5.ORDER_TYPE_BUY else "SELL"}
+                if pos.symbol not in positions_data: positions_data[pos.symbol] = {"profit": 0.0, "volume": 0.0, "type": "BUY" if pos.type == mt5.ORDER_TYPE_BUY else "SELL"}
                 positions_data[pos.symbol]["profit"] += pos.profit
                 positions_data[pos.symbol]["volume"] += pos.volume
 
     return {
-        "bot_running": bot_running, 
-        "portfolio": get_portfolio(), 
+        "bot_running": bot_running, "portfolio": get_portfolio(), 
         "strategies": ["AUTO_DETECT", "Scalping_Fast", "Trend_ADX_EMA", "Bollinger_Bands", "MACD_EMA200", "Donchian_Breakout", "Stoch_RSI"],
-        "market_status": market_status,
-        "account_info": account_data,
-        "positions_data": positions_data
+        "market_status": market_status, "account_info": account_data, "positions_data": positions_data
     }
 
 @app.get("/api/logs", dependencies=[Depends(verify_token)])
-def get_logs():
-    return {"logs": list(bot_logs)}
+def get_logs(): return {"logs": list(bot_logs)}
 
 @app.post("/api/toggle", dependencies=[Depends(verify_token)])
 def toggle_bot():
     global bot_running, bot_thread
-    if bot_running:
-        bot_running = False
-        add_log("⏳ กำลังสั่งหยุดบอท...")
-    else:
-        bot_running = True
-        bot_thread = threading.Thread(target=bot_loop)
-        bot_thread.start()
+    if bot_running: bot_running = False; add_log("⏳ กำลังสั่งหยุดบอท...")
+    else: bot_running = True; bot_thread = threading.Thread(target=bot_loop); bot_thread.start()
     return {"status": "success", "bot_running": bot_running}
 
 @app.post("/api/portfolio", dependencies=[Depends(verify_token)])
 def add_symbol(data: AddSymbol):
     symbol = data.symbol.strip() 
     settings = auto_calculate_settings(symbol)
-    
     if settings is None: 
         add_log(f"⚠️ บังคับเพิ่มคู่เงิน {symbol} (โหมด Manual)")
         settings = {"risk": 1.0, "tp": 2000, "sl": 3000, "trailing": 500, "strategy": "Scalping_Fast"}
-    
-    # 🌟 ค่าเริ่มต้น Timeframe ตอนเพิ่มคู่เงิน
-    tf = "M5" 
-    
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO portfolio (symbol, risk, tp, sl, trailing, strategy, timeframe) VALUES (?, ?, ?, ?, ?, ?, ?)",
-              (symbol, settings["risk"], settings["tp"], settings["sl"], settings["trailing"], settings["strategy"], tf))
-    conn.commit()
-    conn.close()
-    
-    add_log(f"➕ เพิ่มคู่เงิน {symbol} ลงระบบสำเร็จ!")
-    return {"status": "success"}
+    tf, st, et, ml = "M5", "00:00", "23:59", 5.0
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO portfolio (symbol, risk, tp, sl, trailing, strategy, timeframe, start_time, end_time, max_loss) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              (symbol, settings["risk"], settings["tp"], settings["sl"], settings["trailing"], settings["strategy"], tf, st, et, ml))
+    conn.commit(); conn.close()
+    add_log(f"➕ เพิ่มคู่เงิน {symbol} ลงระบบสำเร็จ!"); return {"status": "success"}
 
 @app.put("/api/portfolio/{symbol}", dependencies=[Depends(verify_token)])
 def update_symbol(symbol: str, data: UpdateSetting):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    # 🌟 บันทึก Timeframe ลงฐานข้อมูล
-    c.execute("UPDATE portfolio SET strategy=?, risk=?, tp=?, sl=?, trailing=?, timeframe=? WHERE symbol=?", 
-              (data.strategy, data.risk, data.tp, data.sl, data.trailing, data.timeframe, symbol))
-    conn.commit()
-    conn.close()
-    add_log(f"💾 อัปเดตการตั้งค่า {symbol} สำเร็จ! (TF: {data.timeframe})")
-    return {"status": "success"}
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    c.execute("UPDATE portfolio SET strategy=?, risk=?, tp=?, sl=?, trailing=?, timeframe=?, start_time=?, end_time=?, max_loss=? WHERE symbol=?", 
+              (data.strategy, data.risk, data.tp, data.sl, data.trailing, data.timeframe, data.start_time, data.end_time, data.max_loss, symbol))
+    conn.commit(); conn.close()
+    add_log(f"💾 อัปเดตการตั้งค่า {symbol} สำเร็จ!"); return {"status": "success"}
 
 @app.delete("/api/portfolio/{symbol}", dependencies=[Depends(verify_token)])
 def delete_symbol(symbol: str):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("DELETE FROM portfolio WHERE symbol=?", (symbol,))
-    conn.commit()
-    conn.close()
-    add_log(f"🗑️ ลบคู่เงิน {symbol} ออกจากพอร์ตแล้ว")
-    return {"status": "success"}
+    conn.commit(); conn.close()
+    add_log(f"🗑️ ลบคู่เงิน {symbol} ออกจากพอร์ตแล้ว"); return {"status": "success"}
 
 @app.post("/api/close/{symbol}", dependencies=[Depends(verify_token)])
 def close_order(symbol: str):
@@ -397,14 +375,9 @@ def close_order(symbol: str):
         tick = mt5.symbol_info_tick(symbol)
         type_order = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
         price = tick.bid if type_order == mt5.ORDER_TYPE_SELL else tick.ask
-        req = {
-            "action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": pos.volume, "type": type_order,
-            "position": pos.ticket, "price": price, "deviation": 20, "magic": 123456,
-            "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC
-        }
+        req = { "action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": pos.volume, "type": type_order, "position": pos.ticket, "price": price, "deviation": 20, "magic": 123456, "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC }
         res = mt5.order_send(req)
         if res and res.retcode == mt5.TRADE_RETCODE_DONE: success_count += 1
-            
     if success_count > 0:
         add_log(f"🛑 [Web] กดปุ่มปิดออร์เดอร์ {symbol} สำเร็จ ({success_count} ไม้)")
         send_telegram(f"🛑 ปิดออร์เดอร์ {symbol} ด้วยมือ (Manual Close)")
@@ -413,6 +386,5 @@ def close_order(symbol: str):
 
 if __name__ == "__main__":
     init_db()
-    # 🌟 เปลี่ยน Host เป็น 0.0.0.0 เพื่อให้เข้าจากมือถือ/คอมเครื่องอื่นผ่าน IP ได้!
     print("🚀 เริ่มรัน Backend API และ Web Server ที่ http://0.0.0.0:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)

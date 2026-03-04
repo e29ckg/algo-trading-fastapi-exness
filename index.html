@@ -140,8 +140,7 @@
         
         <div class="row" id="portfolio-grid"></div>
     </div>
-
-    <script>
+<script>
         const API_URL = "/api"; 
         let availableStrategies = [];
         let authToken = localStorage.getItem("bot_token"); 
@@ -201,21 +200,23 @@
                     btn.className = "btn btn-glow-success w-100 py-3 fs-5"; btn.innerHTML = "<i class='fa-solid fa-play me-2'></i>เริ่มทำงานบอท";
                 }
 
-                const activeTag = document.activeElement ? document.activeElement.tagName : "";
-                const isTyping = (activeTag === "INPUT" || activeTag === "SELECT");
-                if (!isTyping) renderPortfolio(data.portfolio, data.market_status, data.positions_data);
+                // 🌟 ระบบใหม่ ปล่อยให้มันอัปเดตตลอดเวลาได้เลย มันจะไม่กวนช่องพิมพ์แล้ว!
+                renderPortfolio(data.portfolio, data.market_status, data.positions_data);
             } catch (e) {}
         }
 
         function renderPortfolio(portfolio, marketStatus, positionsData) {
             const grid = document.getElementById("portfolio-grid");
-            grid.innerHTML = "";
-            const tfs = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1']; // 🌟 ตัวเลือก Timeframe
+            const tfs = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1']; 
+
+            // 🌟 1. เช็คว่ามีคู่เงินไหนถูกลบออกไปไหม (เพื่อเคลียร์การ์ดทิ้ง)
+            Array.from(grid.children).forEach(child => {
+                let sym = child.id.replace('card-', '');
+                if (!portfolio[sym]) child.remove();
+            });
 
             for (const [symbol, setting] of Object.entries(portfolio)) {
                 let options = availableStrategies.map(s => `<option value="${s}" ${setting.strategy === s ? 'selected' : ''}>${s}</option>`).join('');
-                
-                // 🌟 สร้าง HTML สำหรับ Dropdown Timeframe
                 let currentTf = setting.timeframe || 'M5';
                 let tfOptions = tfs.map(t => `<option value="${t}" ${currentTf === t ? 'selected' : ''}>${t}</option>`).join('');
 
@@ -241,45 +242,56 @@
                     posHtml = `<div class="mt-2 p-2 rounded text-center text-secondary small" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05);">ไม่มีออร์เดอร์เปิดอยู่</div>`;
                 }
 
-                grid.innerHTML += `
-                <div class="col-12 col-md-6 col-xl-4 mb-4">
-                    <div class="card-modern p-3 p-md-4">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <h4 class="text-info fw-bold m-0">${symbol}</h4>
-                            <button class="btn btn-sm btn-outline-danger border-0" onclick="deleteSymbol('${symbol}')"><i class="fa-solid fa-trash-can fs-5"></i></button>
+                // 🌟 2. แยกข้อมูลเรียลไทม์ออกมาก้อนนึง (ราคา, สัญญาณ, ADX, RSI, กำไร)
+                let liveContent = `
+                    <div class="p-2 p-md-3 mb-2 rounded shadow-sm" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.05);">
+                        <div class="d-flex justify-content-between align-items-center mb-2 border-bottom border-secondary pb-1">
+                            <span class="small text-secondary">Price: <b class="text-light fs-6">${m.price}</b></span>
+                            <span class="badge bg-dark border border-secondary px-2 px-md-3 py-1 ${sigColor}">Signal: ${m.signal}</span>
                         </div>
-                        <div class="p-2 p-md-3 mb-2 rounded shadow-sm" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.05);">
-                            <div class="d-flex justify-content-between align-items-center mb-2 border-bottom border-secondary pb-1">
-                                <span class="small text-secondary">Price: <b class="text-light fs-6">${m.price}</b></span>
-                                <span class="badge bg-dark border border-secondary px-2 px-md-3 py-1 ${sigColor}">Signal: ${m.signal}</span>
-                            </div>
-                            <div class="d-flex justify-content-between align-items-center small mt-2 flex-wrap">
-                                <span class="text-secondary me-2">ADX: <b class="${adxColor}">${m.adx}</b></span>
-                                <span class="text-secondary me-2">RSI: <b class="text-info">${m.rsi}</b></span>
-                                <span class="text-secondary">Active: <b class="text-warning">${m.strat === '-' ? setting.strategy : m.strat}</b></span>
-                            </div>
+                        <div class="d-flex justify-content-between align-items-center small mt-2 flex-wrap">
+                            <span class="text-secondary me-2">ADX: <b class="${adxColor}">${m.adx}</b></span>
+                            <span class="text-secondary me-2">RSI: <b class="text-info">${m.rsi}</b></span>
+                            <span class="text-secondary">Active: <b class="text-warning">${m.strat === '-' ? setting.strategy : m.strat}</b></span>
                         </div>
-                        ${posHtml}
-                        <hr class="border-secondary mt-3 mb-3">
-                        <div class="row g-2 g-md-3 mb-3">
-                            <div class="col-4">
-                                <label class="small text-secondary mb-1">Timeframe</label>
-                                <select id="tf-${symbol}" class="form-select form-select-sm text-center fw-bold text-info">${tfOptions}</select>
-                            </div>
-                            <div class="col-8">
-                                <label class="small text-secondary mb-1">Strategy Setup</label>
-                                <select id="strat-${symbol}" class="form-select form-select-sm">${options}</select>
-                            </div>
-                        </div>
-                        <div class="row g-2 g-md-3 mb-3">
-                            <div class="col-6"><label class="small text-secondary mb-1">Risk (%)</label><input type="number" step="0.1" id="risk-${symbol}" class="form-control form-control-sm text-center fw-bold text-warning" value="${setting.risk}"></div>
-                            <div class="col-6"><label class="small text-secondary mb-1">Trailing</label><input type="number" id="trail-${symbol}" class="form-control form-control-sm text-center" value="${setting.trailing}"></div>
-                            <div class="col-6"><label class="small text-secondary mb-1 text-success">Take Profit</label><input type="number" id="tp-${symbol}" class="form-control form-control-sm text-center text-success" value="${setting.tp}"></div>
-                            <div class="col-6"><label class="small text-secondary mb-1 text-danger">Stop Loss</label><input type="number" id="sl-${symbol}" class="form-control form-control-sm text-center text-danger" value="${setting.sl}"></div>
-                        </div>
-                        <button class="btn btn-glow-primary w-100 py-2 mt-2" onclick="updateSymbol('${symbol}')"><i class="fa-solid fa-floppy-disk me-2"></i>บันทึกการตั้งค่า</button>
                     </div>
-                </div>`;
+                    ${posHtml}
+                `;
+
+                let card = document.getElementById(`card-${symbol}`);
+                
+                // 🌟 3. ถ้ายูสเซอร์เพิ่ง Add คู่เงิน ให้วาดการ์ดเต็มใบ 1 ครั้ง
+                if (!card) {
+                    grid.insertAdjacentHTML('beforeend', `
+                    <div id="card-${symbol}" class="col-12 col-md-6 col-xl-4 mb-4">
+                        <div class="card-modern p-3 p-md-4">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h4 class="text-info fw-bold m-0">${symbol}</h4>
+                                <button class="btn btn-sm btn-outline-danger border-0" onclick="deleteSymbol('${symbol}')"><i class="fa-solid fa-trash-can fs-5"></i></button>
+                            </div>
+                            
+                            <div id="live-${symbol}">${liveContent}</div>
+                            
+                            <hr class="border-secondary mt-3 mb-3">
+                            
+                            <div class="row g-2 g-md-3 mb-3">
+                                <div class="col-4"><label class="small text-secondary mb-1">Timeframe</label><select id="tf-${symbol}" class="form-select form-select-sm text-center fw-bold text-info">${tfOptions}</select></div>
+                                <div class="col-8"><label class="small text-secondary mb-1">Strategy Setup</label><select id="strat-${symbol}" class="form-select form-select-sm">${options}</select></div>
+                            </div>
+                            <div class="row g-2 g-md-3 mb-3">
+                                <div class="col-6"><label class="small text-secondary mb-1">Risk (%)</label><input type="number" step="0.1" id="risk-${symbol}" class="form-control form-control-sm text-center fw-bold text-warning" value="${setting.risk}"></div>
+                                <div class="col-6"><label class="small text-secondary mb-1">Trailing</label><input type="number" id="trail-${symbol}" class="form-control form-control-sm text-center" value="${setting.trailing}"></div>
+                                <div class="col-6"><label class="small text-secondary mb-1 text-success">Take Profit</label><input type="number" id="tp-${symbol}" class="form-control form-control-sm text-center text-success" value="${setting.tp}"></div>
+                                <div class="col-6"><label class="small text-secondary mb-1 text-danger">Stop Loss</label><input type="number" id="sl-${symbol}" class="form-control form-control-sm text-center text-danger" value="${setting.sl}"></div>
+                            </div>
+                            <button class="btn btn-glow-primary w-100 py-2 mt-2" onclick="updateSymbol('${symbol}')"><i class="fa-solid fa-floppy-disk me-2"></i>บันทึกการตั้งค่า</button>
+                        </div>
+                    </div>`);
+                } 
+                // 🌟 4. แต่ถ้ามีการ์ดอยู่แล้ว ให้เปลี่ยนแค่ข้อมูลโซน Live ด้านบนเท่านั้น ไม่กวนช่องตั้งค่าด้านล่าง!
+                else {
+                    document.getElementById(`live-${symbol}`).innerHTML = liveContent;
+                }
             }
         }
 
@@ -298,7 +310,7 @@
         async function updateSymbol(symbol) {
             const payload = {
                 strategy: document.getElementById(`strat-${symbol}`).value, 
-                timeframe: document.getElementById(`tf-${symbol}`).value, // 🌟 ส่งค่า Timeframe กลับไปบันทึก
+                timeframe: document.getElementById(`tf-${symbol}`).value, 
                 risk: parseFloat(document.getElementById(`risk-${symbol}`).value),
                 tp: parseInt(document.getElementById(`tp-${symbol}`).value), 
                 sl: parseInt(document.getElementById(`sl-${symbol}`).value),

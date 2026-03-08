@@ -172,6 +172,26 @@ def get_signal(symbol, timeframe, strategy):
             if not pd.isna(last.get('EMA_13')) and not pd.isna(last.get('RSI_14')):
                 if prev['EMA_5'] <= prev['EMA_13'] and last['EMA_5'] > last['EMA_13'] and last['RSI_14'] > 50: signal = "BUY"
                 elif prev['EMA_5'] >= prev['EMA_13'] and last['EMA_5'] < last['EMA_13'] and last['RSI_14'] < 50: signal = "SELL"   
+        elif actual_strat == "M1_Engulfing":
+            # ⚡ แพทเทิร์น Price Action (M1): แท่งเทียนกลืนกิน (Engulfing) + กรองด้วย EMA 50
+            df.ta.ema(length=50, append=True)
+            if not pd.isna(last.get('EMA_50')):
+                # ดูสีและขนาดของแท่งเทียน (ก่อนหน้า vs ปัจจุบัน)
+                prev_open, prev_close = prev['open'], prev['close']
+                last_open, last_close = last['open'], last['close']
+                
+                prev_is_red = prev_close < prev_open
+                last_is_green = last_close > last_open
+                prev_is_green = prev_close > prev_open
+                last_is_red = last_close < last_open
+                
+                # 🟢 Bullish Engulfing (เขียวกลืนแดง) + อยู่เหนือเส้น EMA 50 (เทรนด์เป็นขาขึ้น)
+                if prev_is_red and last_is_green and (last_close > prev_open) and (last_open <= prev_close) and (last_close > last['EMA_50']):
+                    signal = "BUY"
+                
+                # 🔴 Bearish Engulfing (แดงกลืนเขียว) + อยู่ใต้เส้น EMA 50 (เทรนด์เป็นขาลง)
+                elif prev_is_green and last_is_red and (last_close < prev_open) and (last_open >= prev_close) and (last_close < last['EMA_50']):
+                    signal = "SELL"
     except Exception: pass
     
     market_status[symbol] = { "price": price_val, "adx": adx_val, "rsi": rsi_val, "signal": signal, "strat": actual_strat }
@@ -323,7 +343,7 @@ def get_status():
 
     return {
         "bot_running": bot_running, "portfolio": get_portfolio(), 
-        "strategies": ["AUTO_DETECT", "Scalping_Fast", "Trend_ADX_EMA", "Bollinger_Bands", "MACD_EMA200", "Donchian_Breakout", "Stoch_RSI"],
+        "strategies": ["AUTO_DETECT", "Scalping_Fast", "M1_Engulfing", "Trend_ADX_EMA", "Bollinger_Bands", "MACD_EMA200", "Donchian_Breakout", "Stoch_RSI"],
         "market_status": market_status, "account_info": account_data, "positions_data": positions_data
     }
 
